@@ -106,14 +106,33 @@ function AbstractMCMC.sample_init!(
     N::Integer;
     verbose::Bool=true,
     resume_from=nothing,
+    init_theta=nothing,
     kwargs...
 )
-
     # Resume the sampler.
     set_resume!(spl; resume_from=resume_from, kwargs...)
 
     # Get `init_theta`
-    initialize_parameters!(spl; verbose=verbose, kwargs...)
+    #initialize_parameters!(spl; verbose=verbose, kwargs...)
+    if init_theta !== nothing
+        spl.state.vi[spl] = init_theta
+        link!(spl.state.vi, spl)
+        model(spl.state.vi, spl)
+        theta = spl.state.vi[spl]
+        spl.state.z = AHMC.phasepoint(rng, theta, spl.state.h)
+    else
+        # Samples new values and sets trans to true, then computes the logp
+        model(spl.state.vi, SampleFromUniform())
+        link!(spl.state.vi, spl)
+        theta = spl.state.vi[spl]
+        spl.state.z = AHMC.phasepoint(rng, theta, spl.state.h)
+        while !isfinite(spl.state.z.ℓπ.value) || !isfinite(spl.state.z.ℓπ.gradient)
+            model(spl.state.vi, SampleFromUniform())
+            link!(spl.state.vi, spl)
+            theta = spl.state.vi[spl]
+            spl.state.z = AHMC.phasepoint(rng, theta, spl.state.h)
+        end
+    end
 
     # Set the default number of adaptations, if relevant.
     if spl.alg isa AdaptiveHamiltonian
@@ -138,6 +157,9 @@ function AbstractMCMC.sample_init!(
     if !islinked(spl.state.vi, spl) && spl.selector.tag == :default
         link!(spl.state.vi, spl)
         model(spl.state.vi, spl)
+    elseif islinked(spl.state.vi, spl) && spl.selector.tag !== :default
+        invlink!(spl.state.vi, spl)
+        model(spl.state.vi, spl)        
     end
 end
 
